@@ -37,6 +37,16 @@ jobs:
       - name: Install EAS CLI
         run: npm install -g eas-cli
 
+      - name: Whoami (diagnostic)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          echo "Resolved identity for this EXPO_TOKEN:"
+          eas whoami || true
+          echo "---"
+          echo "app.json expects owner/projectId:"
+          node -e "console.log(require('./app.json').expo.owner, require('./app.json').expo.extra.eas.projectId)"
+
       - name: Build
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
