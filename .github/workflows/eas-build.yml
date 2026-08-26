@@ -41,6 +41,15 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: eas build:view ${{ inputs.view_build_id }}
 
+      - name: View build (JSON, full detail)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: eas build:view ${{ inputs.view_build_id }} --json | node -e "
+          let d='';
+          process.stdin.on('data', c => d += c);
+          process.stdin.on('end', () => console.log(JSON.stringify(JSON.parse(d), null, 2)));
+          "
+
   build:
     if: github.event.inputs.view_build_id == ''
     runs-on: ubuntu-latest
