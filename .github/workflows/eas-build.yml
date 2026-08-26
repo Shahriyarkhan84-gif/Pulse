@@ -114,6 +114,6 @@ jobs:
           node -e "
             const runs = JSON.parse(require('fs').readFileSync('build-result.json', 'utf8'));
             const list = Array.isArray(runs) ? runs : [runs];
-            const failed = list.some((r) => r.status && r.status !== 'finished');
+            const failed = list.some((r) => r.status && r.status.toUpperCase() !== 'FINISHED');
             process.exit(failed ? 1 : 0);
           "
