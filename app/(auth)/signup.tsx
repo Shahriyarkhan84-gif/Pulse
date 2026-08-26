@@ -6,15 +6,20 @@ import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/features/auth/useAuth";
 
 export default function SignupScreen() {
-  const { isLoading } = useAuth();
+  const { signup } = useAuth();
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSignup = async () => {
-    const { signup } = await import("@/features/auth/authApi");
-    await signup(email, password, username);
-    router.replace("/(tabs)");
+    setIsSubmitting(true);
+    try {
+      await signup(email, password, username);
+      router.replace("/(tabs)");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -44,7 +49,7 @@ export default function SignupScreen() {
         value={password}
         onChangeText={setPassword}
       />
-      <Button label={isLoading ? "Creating..." : "Sign Up"} onPress={handleSignup} disabled={isLoading} />
+      <Button label={isSubmitting ? "Creating..." : "Sign Up"} onPress={handleSignup} disabled={isSubmitting} />
       <Text style={styles.link} onPress={() => router.push("/(auth)/login")}>
         Already have an account? Log in
       </Text>

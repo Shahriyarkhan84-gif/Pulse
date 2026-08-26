@@ -1,13 +1,19 @@
 # Pulse — Live Streaming App
 
 A mobile live-streaming app (iOS + Android), built with **React Native + Expo Router** on the
-client and a small **Node backend** for auth, chat, and stream signaling. This is not a website —
-there is no browser rendering path; every screen below ships as a native app screen.
+client and a small **Node backend** for chat and stream signaling. This is not a website — there
+is no browser rendering path; every screen below ships as a native app screen.
 
-Media is powered by **[LiveKit](https://livekit.io)** — an open-source, self-hostable WebRTC SFU
-(you can also use LiveKit Cloud). Broadcasting and viewing both connect directly to the same
-LiveKit room over WebRTC; the backend's only media-related job is minting short-lived,
-scoped access tokens for it.
+Four external services do the heavy lifting, each doing exactly one job:
+
+- **[LiveKit](https://livekit.io)** — the WebRTC SFU that carries broadcast/playback video.
+- **[Supabase](https://supabase.com)** — auth (email/password) and Postgres (profiles, streams,
+  follows, subscriptions, tips). The client talks to Supabase Auth directly; the backend only
+  verifies tokens and does privileged writes with the service-role key.
+- **[Cloudflare R2](https://developers.cloudflare.com/r2/)** — S3-compatible object storage for
+  avatars/thumbnails. The backend hands out short-lived presigned upload URLs; file bytes go
+  straight from the app to R2, never through the backend.
+- **[Stripe](https://stripe.com)** — Checkout-hosted subscriptions and tips.
 
 ## Why this shape
 
@@ -34,16 +40,27 @@ Live streaming has three concerns that don't belong in one blob, so the structur
                                         room create/delete,
                                         token minting (AccessToken)
                                                 │
-┌─────────────┐      REST      ┌───────────────┐
-│  App client  │◀──────────────│  API (auth,    │
-│              │───────────────▶│  streams, →   │
-└─────────────┘                │  LiveKit token)│
-                                └───────────────┘
+┌─────────────┐      REST      ┌───────────────┐   service role  ┌─────────────┐
+│  App client  │◀──────────────│  API (streams, │────────────────▶│  Supabase   │
+│              │───────────────▶│  uploads,     │                 │ (Postgres)  │
+└──────┬──────┘                │  billing)     │◀────verify JWT──└─────────────┘
+       │                       └───────────────┘
+       │ direct                        │
+       ▼                                ▼
+┌─────────────┐                ┌───────────────┐
+│  Supabase    │                │ Stripe / R2   │
+│  Auth (JWT)  │                │ (billing/media)│
+└─────────────┘                └───────────────┘
 
 ┌─────────────┐   WebSocket    ┌───────────────┐   WebSocket    ┌─────────────┐
 │ Any app user │◀──────────────│ Chat Gateway   │──────────────▶│ Any app user │
 └─────────────┘                └───────────────┘                └─────────────┘
 ```
+
+Auth is deliberately *not* proxied through the backend: the app signs up/logs in against Supabase
+Auth directly and gets back a JWT it holds itself. Every backend route that needs to know who's
+calling (`requireAuth`) just verifies that same JWT against Supabase — the backend never issues or
+stores credentials of its own.
 
 The client never talks to the LiveKit SDK directly except through `src/components/stream/StreamPlayer.tsx`
 (and the `<LiveKitRoom>`/`useTracks` hooks it wraps) — every other screen treats a stream as plain data.
@@ -74,17 +91,20 @@ Pulse/
 │   │   └── ui/                  # Buttons, avatars, generic primitives
 │   │
 │   ├── features/                # One folder per domain: hooks + API calls + local state
-│   │   ├── auth/
+│   │   ├── auth/                # Supabase sign-up/login/session, profile fetch
 │   │   ├── streaming/           # start/stop a broadcast, fetch a stream to watch
 │   │   ├── chat/                # socket-backed chat hook
-│   │   └── discovery/           # live feed, categories, search
+│   │   ├── discovery/           # live feed, categories, search, channel lookup
+│   │   ├── social/              # follow/unfollow (direct Supabase table access)
+│   │   ├── uploads/              # presigned upload → R2
+│   │   └── billing/              # Stripe Checkout (subscribe/tip) via in-app browser
 │   │
 │   ├── services/                 # Thin wrappers around external systems
 │   │   ├── api/                 # REST client (axios) + typed endpoints
 │   │   ├── sockets/              # WebSocket client for chat/presence
 │   │   ├── livekit/              # registerGlobals() — LiveKit's RN WebRTC setup
-│   │   ├── push/                 # Expo push notification registration
-│   │   └── storage/               # Secure token storage
+│   │   ├── supabase/             # Supabase client (auth + Postgres)
+│   │   └── push/                 # Expo push notification registration
 │   │
 │   ├── store/                    # Global app state (zustand)
 │   ├── types/                    # Shared TypeScript types (Stream, User, ChatMessage)
@@ -93,13 +113,18 @@ Pulse/
 │   └── utils/
 │
 ├── assets/                       # Images, fonts
+├── supabase/migrations/          # SQL schema: profiles, streams, follows, subscriptions, tips
 │
-└── server/                       # Minimal backend: auth, stream metadata, chat gateway
+└── server/                       # Minimal backend: LiveKit tokens, uploads, billing, chat gateway
     └── src/
-        ├── routes/                # REST: /auth, /streams, /users
-        ├── sockets/               # Chat WebSocket gateway
-        ├── services/ingest/       # livekitClient.ts — rooms + AccessToken minting
-        └── middleware/
+        ├── routes/                # REST: /streams, /uploads, /billing (+ webhook)
+        ├── sockets/               # Chat WebSocket gateway (identity via Supabase token)
+        ├── services/
+        │   ├── ingest/            # livekitClient.ts — rooms + AccessToken minting
+        │   ├── supabase/          # admin (service-role) + auth (token verification) clients
+        │   ├── storage/           # r2Client.ts — presigned R2 upload URLs
+        │   └── billing/           # stripeClient.ts
+        └── middleware/            # requireAuth — verifies a Supabase bearer token
 ```
 
 ## LiveKit setup
@@ -127,6 +152,36 @@ publish the room as HLS and switch large rooms to HLS on the viewer side — `se
 is the only file that would need to grow an `egress` call and a swap of `viewToken` for a
 `playbackUrl` in `StreamDetail`.
 
+## Supabase setup
+
+1. Create a project at [supabase.com](https://supabase.com).
+2. Run the migration in `supabase/migrations/0001_init.sql` (via the SQL editor, or the Supabase
+   CLI: `supabase db push`). It creates `profiles`/`streams`/`follows`/`subscriptions`/`tips` plus
+   a trigger that turns a Supabase Auth sign-up into a `profiles` row.
+3. Fill in `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY` (root `.env`) and
+   `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` (`server/.env`) from your
+   project's API settings. The service-role key bypasses row-level security — it stays server-side.
+
+## Cloudflare R2 setup
+
+1. Create a bucket and an R2 API token (Account → R2 → Manage API tokens) with read/write access.
+2. Either enable the bucket's public `r2.dev` URL for quick testing, or attach a custom domain —
+   either way that's your `R2_PUBLIC_URL`.
+3. Fill in `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL`
+   in `server/.env`.
+
+## Stripe setup
+
+1. Create a recurring Price in the Stripe Dashboard for channel subscriptions and set
+   `STRIPE_SUBSCRIPTION_PRICE_ID` to its id. Tips use an ad-hoc amount, so they need no Price.
+2. Set `STRIPE_SECRET_KEY` in `server/.env`.
+3. Forward webhooks to your local server while developing: `stripe listen --forward-to
+   localhost:4000/billing/webhook`, and put the CLI's printed signing secret in
+   `STRIPE_WEBHOOK_SECRET`. `checkout.session.completed` writes the `subscriptions`/`tips` row;
+   `customer.subscription.deleted` marks a subscription canceled.
+4. Checkout is a hosted, redirect-based flow — the app opens it with `expo-web-browser` rather
+   than embedding Stripe UI, so there's no PCI scope inside the app itself.
+
 ## Getting started
 
 ```bash
@@ -135,7 +190,8 @@ npx expo prebuild && npx expo run:ios   # custom dev client (see LiveKit setup a
 
 cd server
 npm install
-npm run dev            # run the backend (auth + chat + LiveKit token minting)
+npm run dev            # run the backend (LiveKit tokens, uploads, billing, chat gateway)
 ```
 
-Copy `.env.example` to `.env` in both the root and `server/` before testing.
+Copy `.env.example` to `.env` in both the root and `server/`, then work through the LiveKit,
+Supabase, R2, and Stripe setup sections above before testing signup → go-live → watch end to end.

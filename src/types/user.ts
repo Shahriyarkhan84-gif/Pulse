@@ -3,12 +3,5 @@ export interface User {
   username: string;
   displayName: string;
   avatarUrl?: string;
-  followerCount: number;
   isLive: boolean;
-}
-
-export interface AuthSession {
-  user: User;
-  accessToken: string;
-  refreshToken: string;
 }

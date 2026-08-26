@@ -1,4 +1,11 @@
 import type { Server, Socket } from "socket.io";
+import { supabaseAuth } from "../services/supabase/authClient";
+import { supabaseAdmin } from "../services/supabase/adminClient";
+
+interface ChatIdentity {
+  userId: string;
+  username: string;
+}
 
 /**
  * Chat and viewer presence run on a separate WebSocket gateway from the
@@ -7,8 +14,12 @@ import type { Server, Socket } from "socket.io";
  */
 export function registerChatGateway(io: Server) {
   const viewerCounts = new Map<string, number>();
+  const identities = new Map<string, ChatIdentity>(); // socket.id -> chat identity
 
-  io.on("connection", (socket: Socket) => {
+  io.on("connection", async (socket: Socket) => {
+    identities.set(socket.id, await resolveIdentity(socket));
+    socket.on("disconnect", () => identities.delete(socket.id));
+
     socket.on("chat:join", ({ streamId }: { streamId: string }) => {
       socket.join(streamId);
       const count = (viewerCounts.get(streamId) ?? 0) + 1;
@@ -24,15 +35,31 @@ export function registerChatGateway(io: Server) {
     });
 
     socket.on("chat:send", ({ streamId, body }: { streamId: string; body: string }) => {
-      // TODO: authenticate socket.handshake.auth.token and attach real user info
+      const identity = identities.get(socket.id) ?? { userId: "anonymous", username: "anonymous" };
       io.to(streamId).emit("chat:message", {
         id: `${Date.now()}-${Math.random()}`,
         streamId,
-        userId: "anonymous",
-        username: "anonymous",
+        userId: identity.userId,
+        username: identity.username,
         body,
         sentAt: new Date().toISOString(),
       });
     });
   });
+}
+
+async function resolveIdentity(socket: Socket): Promise<ChatIdentity> {
+  const token = socket.handshake.auth?.token as string | undefined;
+  if (!token) return { userId: "anonymous", username: "anonymous" };
+
+  const { data, error } = await supabaseAuth.auth.getUser(token);
+  if (error || !data.user) return { userId: "anonymous", username: "anonymous" };
+
+  const { data: profile } = await supabaseAdmin
+    .from("profiles")
+    .select("username")
+    .eq("id", data.user.id)
+    .single();
+
+  return { userId: data.user.id, username: profile?.username ?? "anonymous" };
 }

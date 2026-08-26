@@ -17,16 +17,18 @@
       "bundleIdentifier": "com.pulse.app",
       "infoPlist": {
         "NSCameraUsageDescription": "Pulse needs camera access so you can go live.",
-        "NSMicrophoneUsageDescription": "Pulse needs microphone access so you can go live."
+        "NSMicrophoneUsageDescription": "Pulse needs microphone access so you can go live.",
+        "NSPhotoLibraryUsageDescription": "Pulse needs photo library access so you can set a profile picture."
       }
     },
     "android": {
       "package": "com.pulse.app",
-      "permissions": ["CAMERA", "RECORD_AUDIO", "INTERNET"]
+      "permissions": ["CAMERA", "RECORD_AUDIO", "INTERNET", "READ_EXTERNAL_STORAGE"]
     },
     "plugins": [
       "expo-router",
       "expo-camera",
+      "expo-image-picker",
       "@livekit/react-native-expo-plugin",
       "@config-plugins/react-native-webrtc"
     ]
