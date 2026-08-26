@@ -1,0 +1,28 @@
+{
+  "cli": {
+    "version": ">= 13.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "channel": "preview",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://localhost:4000",
+        "EXPO_PUBLIC_CHAT_WS_URL": "ws://localhost:4000",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://placeholder.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "placeholder-anon-key"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
