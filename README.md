@@ -4,45 +4,56 @@ A mobile live-streaming app (iOS + Android), built with **React Native + Expo Ro
 client and a small **Node backend** for auth, chat, and stream signaling. This is not a website —
 there is no browser rendering path; every screen below ships as a native app screen.
 
+Media is powered by **[LiveKit](https://livekit.io)** — an open-source, self-hostable WebRTC SFU
+(you can also use LiveKit Cloud). Broadcasting and viewing both connect directly to the same
+LiveKit room over WebRTC; the backend's only media-related job is minting short-lived,
+scoped access tokens for it.
+
 ## Why this shape
 
 Live streaming has three concerns that don't belong in one blob, so the structure separates them:
 
-1. **Broadcasting** (a phone's camera → the internet) — WebRTC/WHIP ingest, not RTMP, because
-   RTMP encoders on mobile are heavier and Apple/Android camera capture pipes into WebRTC natively.
-2. **Playback** (the internet → thousands of viewers) — HLS/LL-HLS, because WebRTC doesn't scale
-   to large viewer counts without an SFU mesh; the ingest server transcodes WHIP → HLS.
-3. **Chat/presence** — a separate WebSocket gateway, because chat fan-out (many-to-many, low
-   payload) has completely different scaling characteristics than media.
+1. **Broadcasting** (a phone's camera → the internet) and **playback** (the internet → viewers)
+   both go straight to LiveKit's SFU (Selective Forwarding Unit) over WebRTC — no RTMP encoding
+   step, no protocol translation. The SFU fans a publisher's stream out to every subscriber, so
+   the broadcaster's upload cost doesn't grow with the number of viewers, unlike a raw
+   peer-to-peer WebRTC mesh.
+2. **Access control** is a signed JWT per participant (`livekit-server-sdk`), scoped to one room
+   with `canPublish`/`canSubscribe` grants — the backend never proxies media, only tokens.
+3. **Chat/presence** runs on its own WebSocket gateway, separate from the media path — chat
+   fan-out (many-to-many, low payload) has completely different scaling characteristics than video.
 
 ```
-┌─────────────┐  WHIP/WebRTC   ┌───────────────┐   HLS/LL-HLS   ┌─────────────┐
-│  Broadcaster │ ─────────────▶│  Media Server  │──────────────▶│   Viewers    │
-│  (Pulse app) │                │ (ingest+trans- │                │ (Pulse app) │
-└─────────────┘                │   code, e.g.   │                └─────────────┘
-                                │ LiveKit/Mux/IVS)│
+┌─────────────┐                                    ┌─────────────┐
+│  Broadcaster │──── WebRTC (publish token) ───┐    │   Viewers    │
+│  (Pulse app) │                                ▼    │  (Pulse app) │
+└─────────────┘                        ┌───────────────┐           │
+                                        │   LiveKit SFU  │◀── WebRTC (subscribe token)
+                                        └───────────────┘
+                                                ▲
+                                        room create/delete,
+                                        token minting (AccessToken)
+                                                │
+┌─────────────┐      REST      ┌───────────────┐
+│  App client  │◀──────────────│  API (auth,    │
+│              │───────────────▶│  streams, →   │
+└─────────────┘                │  LiveKit token)│
                                 └───────────────┘
 
 ┌─────────────┐   WebSocket    ┌───────────────┐   WebSocket    ┌─────────────┐
 │ Any app user │◀──────────────│ Chat Gateway   │──────────────▶│ Any app user │
 └─────────────┘                └───────────────┘                └─────────────┘
-
-┌─────────────┐      REST      ┌───────────────┐
-│  App client  │◀──────────────│  API (auth,    │
-│              │───────────────▶│  users, streams│
-└─────────────┘                │  metadata)     │
-                                └───────────────┘
 ```
 
-The client never talks to a raw media server SDK directly except through `src/services/webrtc`
-and the player component — everything else (screens, chat, discovery) treats a stream as data.
+The client never talks to the LiveKit SDK directly except through `src/components/stream/StreamPlayer.tsx`
+(and the `<LiveKitRoom>`/`useTracks` hooks it wraps) — every other screen treats a stream as plain data.
 
 ## Directory structure
 
 ```
 Pulse/
 ├── app/                        # Expo Router — file-based navigation = the app's screens
-│   ├── _layout.tsx             # Root providers (auth, theme, query client)
+│   ├── _layout.tsx             # Root providers + registers LiveKit's WebRTC globals
 │   ├── (auth)/                 # Unauthenticated stack
 │   │   ├── login.tsx
 │   │   └── signup.tsx
@@ -57,21 +68,21 @@ Pulse/
 │
 ├── src/
 │   ├── components/             # Presentational, reusable, no business logic
-│   │   ├── stream/             # Player, stream cards, live badge, viewer count
+│   │   ├── stream/             # StreamPlayer (LiveKit video), stream cards, live badge
 │   │   ├── chat/                # Chat panel, message row, composer
-│   │   ├── broadcast/           # Camera preview, go-live controls
+│   │   ├── broadcast/           # Pre-flight camera preview, go-live controls
 │   │   └── ui/                  # Buttons, avatars, generic primitives
 │   │
 │   ├── features/                # One folder per domain: hooks + API calls + local state
 │   │   ├── auth/
-│   │   ├── streaming/           # start/stop/join a stream, ingest URL fetch
+│   │   ├── streaming/           # start/stop a broadcast, fetch a stream to watch
 │   │   ├── chat/                # socket-backed chat hook
 │   │   └── discovery/           # live feed, categories, search
 │   │
 │   ├── services/                 # Thin wrappers around external systems
 │   │   ├── api/                 # REST client (axios) + typed endpoints
 │   │   ├── sockets/              # WebSocket client for chat/presence
-│   │   ├── webrtc/               # WHIP publish client for broadcasting
+│   │   ├── livekit/              # registerGlobals() — LiveKit's RN WebRTC setup
 │   │   ├── push/                 # Expo push notification registration
 │   │   └── storage/               # Secure token storage
 │   │
@@ -87,30 +98,44 @@ Pulse/
     └── src/
         ├── routes/                # REST: /auth, /streams, /users
         ├── sockets/               # Chat WebSocket gateway
-        ├── services/ingest/       # Talks to the media server (LiveKit/Mux/IVS) API
+        ├── services/ingest/       # livekitClient.ts — rooms + AccessToken minting
         └── middleware/
 ```
 
-## Suggested media server
+## LiveKit setup
 
-This scaffold assumes a managed or self-hosted media server that speaks WHIP-in / HLS-out
-(e.g. **LiveKit**, **Mux Real-Time Video**, or **Amazon IVS Real-Time**). `server/src/services/ingest`
-is the one place that would need a real SDK call to create a room/channel and return:
-- a WHIP publish URL + token to the broadcaster (`go-live.tsx`)
-- an HLS playback URL to viewers (`stream/[id].tsx`)
+1. Get a LiveKit project — either [LiveKit Cloud](https://cloud.livekit.io) (free tier available)
+   or a [self-hosted](https://docs.livekit.io/home/self-hosting/local/) instance.
+2. Copy `server/.env.example` to `server/.env` and fill in `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
+   `LIVEKIT_API_SECRET` from your project's settings.
+3. That's it on the client side — the app never holds LiveKit credentials; it only receives a
+   scoped token per session from `POST /streams` (broadcaster) or `GET /streams/:id` (viewer).
 
-Swapping media-server providers only touches that one file plus `src/services/webrtc/webrtcClient.ts`.
+`react-native-webrtc` (which LiveKit's RN SDK depends on) ships native modules, so this app needs
+a custom dev client — it will **not** run inside Expo Go. Build one with:
+
+```bash
+npx expo prebuild
+npx expo run:ios      # or: npx expo run:android
+```
+
+### Scaling past the SFU
+
+LiveKit's SFU comfortably handles real-time WebRTC fan-out for most live-audience sizes. For
+audiences beyond that (tens of thousands+), the standard move is **LiveKit Egress** to also
+publish the room as HLS and switch large rooms to HLS on the viewer side — `server/src/services/ingest/livekitClient.ts`
+is the only file that would need to grow an `egress` call and a swap of `viewToken` for a
+`playbackUrl` in `StreamDetail`.
 
 ## Getting started
 
 ```bash
 npm install
-npx expo start        # run the client (scan QR with Expo Go, or run on a simulator)
+npx expo prebuild && npx expo run:ios   # custom dev client (see LiveKit setup above)
 
 cd server
 npm install
-npm run dev            # run the backend (auth + chat + stream metadata)
+npm run dev            # run the backend (auth + chat + LiveKit token minting)
 ```
 
-Copy `.env.example` to `.env` in both the root and `server/`, and fill in your media-server
-credentials before testing real broadcasts.
+Copy `.env.example` to `.env` in both the root and `server/` before testing.

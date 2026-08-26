@@ -24,6 +24,11 @@
       "package": "com.pulse.app",
       "permissions": ["CAMERA", "RECORD_AUDIO", "INTERNET"]
     },
-    "plugins": ["expo-router", "expo-camera"]
+    "plugins": [
+      "expo-router",
+      "expo-camera",
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc"
+    ]
   }
 }

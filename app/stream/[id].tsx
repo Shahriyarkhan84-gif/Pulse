@@ -20,7 +20,7 @@ export default function StreamScreen() {
 
   return (
     <View style={styles.container}>
-      <StreamPlayer playbackUrl={stream.playbackUrl} />
+      <StreamPlayer serverUrl={stream.livekitUrl} token={stream.viewToken} />
       <View style={styles.info}>
         <Text style={styles.title}>{stream.title}</Text>
         <ViewerCount count={stream.viewerCount} />

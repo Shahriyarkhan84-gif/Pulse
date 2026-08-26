@@ -1,5 +1,6 @@
+import { randomUUID } from "crypto";
 import { Router } from "express";
-import { createRoom, endRoom } from "../services/ingest/mediaServerClient";
+import { createRoom, createViewerToken, endRoom } from "../services/ingest/livekitClient";
 
 export const streamsRouter = Router();
 
@@ -9,13 +10,27 @@ streamsRouter.get("/live", async (req, res) => {
 });
 
 streamsRouter.get("/:id", async (req, res) => {
-  // TODO: fetch stream metadata + resolve HLS playback URL from the media server
-  res.status(404).json({ message: "not found" });
+  // TODO: replace with a real stream metadata lookup once a database is wired up
+  const viewerIdentity = `viewer-${randomUUID()}`;
+  const { livekitUrl, viewToken } = await createViewerToken(req.params.id, viewerIdentity);
+
+  res.json({
+    id: req.params.id,
+    title: "Untitled stream",
+    category: "general",
+    viewerCount: 0,
+    status: "live",
+    host: { id: "unknown", username: "unknown", displayName: "Unknown" },
+    livekitUrl,
+    viewToken,
+  });
 });
 
 streamsRouter.post("/", async (req, res) => {
-  const { title, category } = req.body;
-  const credentials = await createRoom(title, category);
+  const { title } = req.body;
+  // TODO: derive identity from the authenticated user once auth is wired up
+  const hostIdentity = `host-${randomUUID()}`;
+  const credentials = await createRoom(hostIdentity, title);
   res.json(credentials);
 });
 

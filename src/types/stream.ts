@@ -13,12 +13,13 @@ export interface StreamSummary {
 }
 
 export interface StreamDetail extends StreamSummary {
-  playbackUrl: string; // HLS/LL-HLS URL, viewer side
+  livekitUrl: string; // wss:// URL of the LiveKit server/cloud project
+  viewToken: string; // subscribe-only LiveKit access token, viewer side
   startedAt?: string;
 }
 
 export interface BroadcastCredentials {
   streamId: string;
-  whipUrl: string; // WHIP publish endpoint, broadcaster side
-  publishToken: string;
+  livekitUrl: string;
+  publishToken: string; // publish-enabled LiveKit access token, broadcaster side
 }
