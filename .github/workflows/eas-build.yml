@@ -47,6 +47,11 @@ jobs:
           echo "app.json expects owner/projectId:"
           node -e "console.log(require('./app.json').expo.owner, require('./app.json').expo.extra.eas.projectId)"
 
+      - name: Link/create EAS project
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: eas init --non-interactive
+
       - name: Build
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}

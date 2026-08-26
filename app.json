@@ -2,7 +2,7 @@
   "expo": {
     "name": "Pulse",
     "slug": "pulse-live",
-    "owner": "shahriyarkhan84-team",
+    "owner": "shahriyarkhan84",
     "scheme": "pulse",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -34,9 +34,7 @@
       "@config-plugins/react-native-webrtc"
     ],
     "extra": {
-      "eas": {
-        "projectId": "9858293f-1209-4809-b03b-cb4f4153aba3"
-      }
+      "eas": {}
     }
   }
 }
