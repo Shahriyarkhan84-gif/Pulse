@@ -1,0 +1,64 @@
+name: EAS Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "eas.json build profile"
+        required: true
+        default: "preview"
+        type: choice
+        options:
+          - preview
+          - production
+      platform:
+        description: "Target platform"
+        required: true
+        default: "android"
+        type: choice
+        options:
+          - android
+          - ios
+          - all
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Build
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas build \
+            --platform ${{ inputs.platform }} \
+            --profile ${{ inputs.profile }} \
+            --non-interactive \
+            --wait \
+            --json > build-result.json
+          cat build-result.json
+
+      - name: Summarize build
+        if: always()
+        run: |
+          if [ -f build-result.json ]; then
+            echo "## EAS Build result" >> "$GITHUB_STEP_SUMMARY"
+            node -e "
+              const runs = JSON.parse(require('fs').readFileSync('build-result.json', 'utf8'));
+              const list = Array.isArray(runs) ? runs : [runs];
+              for (const run of list) {
+                console.log(\`- **\${run.platform}** (\${run.status}): \${run.artifacts?.buildUrl ?? run.error?.message ?? 'no artifact URL'}\`);
+              }
+            " >> "$GITHUB_STEP_SUMMARY"
+          fi
