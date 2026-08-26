@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Pulse",
+    "slug": "pulse",
+    "scheme": "pulse",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/images/icon.png",
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B0B0F"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.pulse.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Pulse needs camera access so you can go live.",
+        "NSMicrophoneUsageDescription": "Pulse needs microphone access so you can go live."
+      }
+    },
+    "android": {
+      "package": "com.pulse.app",
+      "permissions": ["CAMERA", "RECORD_AUDIO", "INTERNET"]
+    },
+    "plugins": ["expo-router", "expo-camera"]
+  }
+}
