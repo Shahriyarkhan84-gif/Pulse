@@ -20,9 +20,28 @@ on:
           - android
           - ios
           - all
+      view_build_id:
+        description: "If set, skip building and just print details for this existing EAS build ID"
+        required: false
+        default: ""
 
 jobs:
+  view:
+    if: github.event.inputs.view_build_id != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install -g eas-cli
+      - name: View build
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: eas build:view ${{ inputs.view_build_id }}
+
   build:
+    if: github.event.inputs.view_build_id == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +80,8 @@ jobs:
             --profile ${{ inputs.profile }} \
             --non-interactive \
             --wait \
-            --json > build-result.json
+            --json > build-result.json || true
+          echo "----- build-result.json -----"
           cat build-result.json
 
       - name: Summarize build
@@ -77,3 +97,13 @@ jobs:
               }
             " >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Fail if the EAS build itself failed
+        if: always()
+        run: |
+          node -e "
+            const runs = JSON.parse(require('fs').readFileSync('build-result.json', 'utf8'));
+            const list = Array.isArray(runs) ? runs : [runs];
+            const failed = list.some((r) => r.status && r.status !== 'finished');
+            process.exit(failed ? 1 : 0);
+          "
