@@ -24,10 +24,27 @@ on:
         description: "If set, skip building and just print details for this existing EAS build ID"
         required: false
         default: ""
+      download_url:
+        description: "If set, skip building and just mirror this URL as a GitHub Actions artifact (bypass the Expo CDN)"
+        required: false
+        default: ""
 
 jobs:
+  fetch-artifact:
+    if: github.event.inputs.download_url != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download APK from Expo CDN
+        run: curl -fL --max-time 300 -o pulse.apk "${{ inputs.download_url }}"
+      - name: Upload as a GitHub Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulse-apk
+          path: pulse.apk
+          retention-days: 14
+
   view:
-    if: github.event.inputs.view_build_id != ''
+    if: github.event.inputs.view_build_id != '' && github.event.inputs.download_url == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +68,7 @@ jobs:
           "
 
   build:
-    if: github.event.inputs.view_build_id == ''
+    if: github.event.inputs.view_build_id == '' && github.event.inputs.download_url == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
