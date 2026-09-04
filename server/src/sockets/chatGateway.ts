@@ -16,8 +16,11 @@ export function registerChatGateway(io: Server) {
   const viewerCounts = new Map<string, number>();
   const identities = new Map<string, ChatIdentity>(); // socket.id -> chat identity
 
-  io.on("connection", async (socket: Socket) => {
-    identities.set(socket.id, await resolveIdentity(socket));
+  io.on("connection", (socket: Socket) => {
+    // Register listeners synchronously so a "chat:join"/"chat:send" sent
+    // right after connecting is never dropped while identity resolves —
+    // chat:send already falls back to "anonymous" if it arrives first.
+    resolveIdentity(socket).then((identity) => identities.set(socket.id, identity));
     socket.on("disconnect", () => identities.delete(socket.id));
 
     socket.on("chat:join", ({ streamId }: { streamId: string }) => {
